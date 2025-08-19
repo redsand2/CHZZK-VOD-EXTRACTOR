@@ -32,12 +32,12 @@
 
 ## 프로젝트 구조
 .
-├─ manifest.json
-├─ background.js # 수집/가공/저장(서비스 워커)
-├─ popup.html # 팝업 UI
-├─ popup.css # 팝업 스타일(막대형 진행률 포함)
-├─ popup.js # 팝업 로직(메시징, 진행률 갱신, 입력값 저장/복원)
-└─ icons/ # 아이콘(16/32/48/128px)
+├─ manifest.json  
+├─ background.js # 수집/가공/저장(서비스 워커)  
+├─ popup.html # 팝업 UI  
+├─ popup.css # 팝업 스타일(막대형 진행률 포함)  
+├─ popup.js # 팝업 로직(메시징, 진행률 갱신, 입력값 저장/복원)  
+└─ icons/ # 아이콘(16/32/48/128px)  
 
 ## 배포
 1. (Chrome Web Store)
