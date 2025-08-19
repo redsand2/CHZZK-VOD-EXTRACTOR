@@ -31,7 +31,7 @@
 - 배포 형태: 무료
 
 ## 프로젝트 구조
-.
+.  
 ├─ manifest.json  
 ├─ background.js # 수집/가공/저장(서비스 워커)  
 ├─ popup.html # 팝업 UI  
