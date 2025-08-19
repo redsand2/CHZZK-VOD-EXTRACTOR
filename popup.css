@@ -1,0 +1,214 @@
+:root {
+  --bg: #ffffff;
+  --text: #222222;
+  --muted: #666666;
+  --border: #dddddd;
+  --accent: #4e9cff;
+  --accent-hover: #3a8fe8;
+  --bar-bg: #eeeeee;
+  --bar-fill-start: #4e9cff;
+  --bar-fill-end: #2ecc71;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121212;
+    --text: #fafafa;
+    --muted: #bdbdbd;
+    --border: #2a2a2a;
+    --accent: #78b6ff;
+    --accent-hover: #5aa6ff;
+    --bar-bg: #1f1f1f;
+    --bar-fill-start: #78b6ff;
+    --bar-fill-end: #55d88d;
+  }
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+body {
+  box-sizing: border-box;
+  min-width: 420px;
+  margin: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.container { width: 100%; }
+.section { margin-bottom: 12px; }
+
+label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+input[type="text"] {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+input[type="text"]::placeholder { color: #999; }
+input[type="text"]:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(78, 156, 255, 0.15);
+}
+
+/* 시간 입력 행: 각 라벨 아래에 입력칸 정렬 */
+.time-row {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 12px;
+}
+.time-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* 시작/종료 입력칸은 적당히 짧게 */
+#timeStart, #timeEnd {
+  width: 100%;
+  max-width: 160px;
+  margin-top: 4px;
+}
+
+/* VOD 주소 입력칸: 중앙 */
+#userInput {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
+}
+
+/* 버튼: 작게 + 중앙 정렬 */
+#generateBtn,
+#generateJsonBtn {
+  display: block;
+  width: 100%;
+  max-width: 160px;
+  margin: 0 auto 8px;
+
+  padding: 10px 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.06s ease;
+}
+#generateBtn:hover, #generateJsonBtn:hover { background: var(--accent-hover); }
+#generateBtn:active, #generateJsonBtn:active { transform: translateY(1px); }
+#generateBtn:disabled, #generateJsonBtn:disabled { background: #9bbff0; cursor: not-allowed; }
+
+/* 진행률 바 (라벨 중앙 고정) */
+#progressBar {
+  width: 100%;
+  max-width: 320px;
+  margin: 0 auto;
+
+  height: 16px;
+  background: var(--bar-bg);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.08);
+  position: relative; /* 라벨 중앙 고정 기준 */
+}
+
+#progressBarFill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--bar-fill-start), var(--bar-fill-end));
+  transition: width 0.2s ease-out;
+}
+
+/* 라벨 중앙 */
+#progressBarLabel {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  color: #fff;
+  font-weight: 700;
+  font-size: 11px;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.35);
+  pointer-events: none;
+}
+
+/* 인디케이터(퍼센트 미산출)일 때 라벨 숨김 */
+#progressBarFill.indeterminate ~ #progressBarLabel,
+#progressBarFill.indeterminate #progressBarLabel { opacity: 0; }
+
+/* 인디케이터 애니메이션 */
+#progressBarFill.indeterminate {
+  width: 35%;
+  background: linear-gradient(90deg, #cfd9df 0%, #e2ebf0 50%, #cfd9df 100%);
+  animation: indeterminate-slide 1.2s linear infinite;
+}
+@keyframes indeterminate-slide {
+  0%   { transform: translateX(-120%); }
+  100% { transform: translateX(250%); }
+}
+
+/* 소요 시간/결과 */
+#elapsedTime {
+  display: none;  /* 완료 시 JS로 보이게 */
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+}
+#result {
+  margin-top: 10px;
+  color: var(--text);
+  font-size: 13px;
+}
+#result p { margin: 6px 0; line-height: 1.4; }
+
+/* 반응형 */
+@media (max-width: 460px) {
+  #userInput { max-width: 100%; }
+  #timeStart, #timeEnd { max-width: 100%; }
+  #generateBtn, #generateJsonBtn { max-width: 100%; }
+  #progressBar { max-width: 100%; }
+}
+
+/* 시작/종료 시간 입력칸 가로 폭 축소(오버라이드) */
+#timeStart,
+#timeEnd {
+  display: block !important;
+  width: 120px !important;      /* 원하는 폭으로 조정: 140/120/100px 등 */
+  max-width: 120px !important;  /* 동일 상한 고정 */
+  box-sizing: border-box;
+  margin: 4px auto 0 !important; /* 라벨 아래 중앙 정렬 */
+  padding: 6px 8px;             /* 폭이 줄어든 만큼 패딩도 살짝 줄임(선택) */
+}
+
+/* 두 칸 사이 간격 살짝 축소(선택) */
+.time-row { gap: 8px !important; }
+
+/* 아주 좁은 화면에서는 보기 좋게 자동 확장(선택) */
+@media (max-width: 460px) {
+  #timeStart,
+  #timeEnd {
+    display: inline-block !important;
+    width: 48% !important;
+    max-width: 48% !important;
+    margin: 4px 0 0 !important;
+  }
+  .time-row { flex-wrap: wrap; }
+}

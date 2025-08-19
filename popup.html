@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>CHZZK VOD 채팅 추출</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- VOD 주소 -->
+    <div class="section">
+      <label for="userInput">다시보기 URL을 입력하세용가리</label>
+      <input id="userInput" type="text" placeholder="https://chzzk.naver.com/video/1414141">
+    </div>
+
+    <!-- 시간 구간(기본 전체) -->
+    <div class="section">
+      <div class="time-row">
+        <div class="time-col">
+          <label for="timeStart">시작 시간(선택)</label>
+          <input id="timeStart" type="text" inputmode="numeric" placeholder="00:00:00">
+        </div>
+        <div class="time-col">
+          <label for="timeEnd">종료 시간(선택)</label>
+          <input id="timeEnd" type="text" inputmode="numeric" placeholder="hh:mm:ss">
+        </div>
+      </div>
+    </div>
+
+    <!-- 실행 버튼 -->
+    <div class="section">
+      <button id="generateBtn">엑셀파일로 저장(.csv)</button>
+      <button id="generateJsonBtn">JSON 생성(개발자용)</button>
+    </div>
+
+    <!-- 진행률 바(퍼센트만 표시, 라벨 중앙 고정) -->
+    <div class="section">
+      <div id="progressBar" role="progressbar" aria-label="진행률" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="progressBarFill"></div>
+        <span id="progressBarLabel">0%</span>
+      </div>
+    </div>
+
+    <!-- 총 소요 시간: 완료 시에만 보임 (초기 숨김) -->
+    <div id="elapsedTime">총 소요 시간: -</div>
+
+    <!-- 결과/로그 미리보기 -->
+    <div id="result"></div>
+  </div>
+
+  <script src="popup.js" defer></script>
+</body>
+</html>

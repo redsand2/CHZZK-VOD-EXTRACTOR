@@ -1,0 +1,6 @@
+*.pem
+*.crx
+*.csv
+*.json
+*.txt
+!/manifest.json

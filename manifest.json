@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "치지직 VOD 채팅 추출기",
+  "short_name": "Chzzk Chat Extractor",
+  "version": "1.0.0",
+  "description": "치지직 VOD의 채팅 로그를 엑셀파일로(.csv) 정리합니다.",
+  "action": {
+    "default_title": "치지직 VOD 채팅 추출기",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "downloads",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://api.chzzk.naver.com/*"
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
