@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>CHZZK VOD 채팅 그래프 뚝딱이</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Plotly -->
+  <script src="https://cdn.plot.ly/plotly-2.27.1.min.js"></script>
+  <!-- PapaParse -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <style>
+    :root { --fg:#222; --muted:#666; --bg:#fff; --border:#eee; --blue:#4e9cff; --green:#2ecc71; }
+    body { font-family: system-ui, -apple-system, "Noto Sans KR", Arial; margin:16px; color:var(--fg); background:var(--bg); }
+    .wrap { max-width: 1200px; margin: 0 auto; width: 100%; }
+    .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+    label { color:var(--muted); min-width:88px; }
+    input[type="file"], input[type="range"], button { padding:6px 8px; }
+    input[type="range"] { width: 280px; }
+    .hint { color:var(--muted); font-size:12px; }
+    .btn { padding:6px 10px; border:1px solid #ddd; background:#fafafa; border-radius:6px; cursor:pointer; }
+    .btn:hover { background:#f0f0f0; }
+    .card { background:#fff; border:1px solid var(--border); border-radius:8px; padding:8px; }
+    #chart { height: 540px; position: relative; }
+
+    /* 드래그 앤 드롭 박스(세로 크게) */
+    .dropzone {
+      width: 100%; border: 2px dashed #bbb; border-radius: 10px; padding: 32px; min-height: 200px;
+      text-align: center; color: #666; cursor: pointer; transition: border-color .15s, background-color .15s, color .15s;
+      user-select: none; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:8px;
+    }
+    .dropzone.hover { border-color: #4e9cff; background: #f7fbff; color: #3a7edb; }
+
+    /* 커서 추적 말풍선(그래프 위에서 마우스를 따라다님) */
+    .cursor-tooltip {
+      position: fixed; z-index: 9999;
+      padding: 6px 10px; border-radius: 8px;
+      background: rgba(0,0,0,0.8); color: #fff; font-weight: 700; font-size: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      pointer-events: none; white-space: nowrap;
+      transform: translate(8px, -28px); /* 커서 오른쪽 위에 표시 */
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h2>CHZZK VOD 채팅 그래프 뚝딱이</h2>
+
+    <!-- 업로드: 드래그 앤 드롭 + 파일 선택 -->
+    <div id="dropzone" class="dropzone">
+      <div style="font-size:16px;">CSV 파일을 여기로 드래그 앤 드롭</div>
+      <div class="row" style="margin:8px 0 0 0;">
+        <label for="file" class="hint" style="min-width:unset;">또는 파일 선택</label>
+        <input type="file" id="file" accept=".csv,text/csv" />
+      </div>
+      <span class="hint">확장에서 만든 CSV</span>
+    </div>
+
+    <!-- 제어부(기존 조종 기능은 변경하지 않음) -->
+    <div class="row" style="margin-top:12px;">
+      <label for="tt">lag(초)</label>
+      <input type="range" id="tt" min="0" max="120" value="60" step="1" />
+      <span id="ttLabel">tt = 60초</span>
+      <button id="redrawBtn" class="btn">그리기/갱신</button>
+      <button id="fitBtn"    class="btn">데이터 범위로</button>
+      <span id="info" class="hint"></span>
+    </div>
+
+    <!-- 차트 + 커서 말풍선 -->
+    <div id="chart" class="card"></div>
+    <div id="cursorTooltip" class="cursor-tooltip">- 00:00:00 -</div>
+
+    <!-- 요약 -->
+    <div class="card" style="margin-top:12px;">
+      <h3 style="margin:8px 0;">요약</h3>
+      <div id="summary" class="hint">CSV를 불러오면 통계가 표시됩니다.</div>
+    </div>
+  </div>
+
+  <script>
+    /* 전역 드롭 기본 동작 차단(파일이 새 탭으로 열리는 문제 방지) */
+    ['dragover','drop'].forEach(evt => {
+      window.addEventListener(evt, e => { e.preventDefault(); }, { passive:false });
+    });
+
+    // 상태
+    let rawRows = [];
+    let plotInited = false;
+    let xMinMs = 0;                  // x축 좌측 끝(데이터 첫 시각 상대 0초 → 로컬자정 기준 ms)
+    let xMaxMs = 0;                  // x축 우측 끝(데이터 마지막 시각 상대 ms)
+    const barBinSec = 30;            // 초록 막대 간격(초)
+    let isTickUpdating = false;      // relayout 루프 가드
+    let relayoutTimer  = null;       // 디바운스 타이머
+
+    // DOM
+    const $ = id => document.getElementById(id);
+    const dropzone  = $('dropzone');
+    const fileEl    = $('file');
+    const ttEl      = $('tt');
+    const ttLabel   = $('ttLabel');
+    const redrawBtn = $('redrawBtn');
+    const fitBtn    = $('fitBtn');
+    const infoEl    = $('info');
+    const summaryEl = $('summary');
+    const chartEl   = $('chart');
+    const cursorBox = $('cursorTooltip');
+
+    // 유틸: HH:MM:SS ↔ 초
+    function hmsToSec(hms) {
+      const [h,m,s] = (hms||'00:00:00').split(':').map(v=>parseInt(v,10)||0);
+      return h*3600 + m*60 + s;
+    }
+    function secToHMS(sec) {
+      const s = Math.max(0, Math.round(sec));
+      const h = String(Math.floor(s/3600)).padStart(2,'0');
+      const m = String(Math.floor((s%3600)/60)).padStart(2,'0');
+      const d = String(s%60).padStart(2,'0');
+      return `${h}:${m}:${d}`;
+    }
+
+    // 로컬 자정(00:00:00)을 0초로 보이게 하는 기준 ms (상대 시간축)
+    const localMidnightBaseMs = new Date().getTimezoneOffset() * 60000; // 예: KST -32400000
+    const toDateFromRelSec = (relSec) => new Date(localMidnightBaseMs + relSec*1000);
+
+    // 버킷팅(0초 더미 포함 + 연속 생성) — 좌/우 데이터 범위로 마감
+    function bucketize(rows, binSec) {
+      const t = Math.max(1, binSec|0);
+      const map = new Map();
+      let minSec = Infinity;
+      let maxSec = 0;
+      for (const r of rows) {
+        const sec = hmsToSec(r.time);
+        if (!Number.isFinite(sec)) continue;
+        minSec = Math.min(minSec, sec);
+        maxSec = Math.max(maxSec, sec);
+        const b = Math.floor(sec / t) * t;
+        map.set(b, (map.get(b) || 0) + 1);
+      }
+      if (!Number.isFinite(minSec)) minSec = 0;
+      const endSec = Math.ceil(maxSec / t) * t;
+      const startSec = Math.floor(minSec / t) * t;
+      const xsSec = [], ys = [];
+      for (let s = startSec; s <= endSec; s += t) {
+        xsSec.push(s);
+        ys.push(Number(map.get(s) || 0));
+      }
+      return { xsSec, ys, startSec, endSec };
+    }
+
+    // x축 눈금(표시 범위: [startMs, endMs]) — 데이터가 없는 좌/우엔 라벨 없음
+    function computeDateTicks(startMs, endMs) {
+      const span = Math.max(1, endMs - startMs);
+      const target = 10; // 최대 눈금 개수
+      const stepsSec = [1,2,5,10,15,30,60,120,300,600,1800,3600,7200];
+      let stepSec = stepsSec[0];
+      for (const s of stepsSec) {
+        if (span / (s*1000) <= target) { stepSec = s; break; }
+        stepSec = s;
+      }
+      const vals = [];
+      // startMs 기준 정렬
+      const startAligned = Math.floor((startMs - localMidnightBaseMs)/(stepSec*1000)) * stepSec*1000 + localMidnightBaseMs;
+      for (let ms = startAligned; ms <= endMs; ms += stepSec*1000) vals.push(new Date(ms));
+      const texts = vals.map(d => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`);
+      return { tickvals: vals, ticktext: texts };
+    }
+
+    // 차트 그리기(겹쳐: 초록 막대 + 파란 선), hover엔 시간만( - HH:MM:SS - )
+    function draw(line, bars) {
+      const firstSec = line.startSec;
+      const lineRelDates = line.xsSec.map(s => toDateFromRelSec(s - firstSec));
+      const barsRelDates = bars.xsSec.map(s => toDateFromRelSec(s - firstSec));
+      xMinMs = localMidnightBaseMs;                                          // 00:00:00(첫 데이터 시간) 위치
+      xMaxMs = localMidnightBaseMs + (line.endSec - firstSec) * 1000;        // 마지막 데이터 시각
+
+      // 기존 그래프 정리(핸들러 누적 방지)
+      if (chartEl.data) Plotly.purge(chartEl);
+
+      const traces = [
+        {
+          type: 'bar',
+          name: '타임라인(건수)',
+          x: barsRelDates,
+          y: bars.ys,
+          width: barsRelDates.map(()=> barBinSec*1000),
+          marker: { color: 'rgba(46, 204, 113, 0.70)', line: { color: '#2ecc71', width: 1 } },
+          hoverinfo: 'skip' // 항목 숨김 → x unified의 헤더만 사용
+        },
+        {
+          type: 'scatter',
+          mode: 'lines',
+          name: 'tt집계',
+          x: lineRelDates,
+          y: line.ys,
+          line: { color: '#4e9cff', width: 2 },
+          hoverinfo: 'skip'
+        }
+      ];
+
+      const { tickvals, ticktext } = computeDateTicks(xMinMs, xMaxMs);
+
+      const layout = {
+        margin: { l: 56, r: 16, t: 12, b: 40 },
+        bargap: 0, barmode: 'overlay',
+        showlegend: false,
+
+        hovermode: 'x unified',      // 선/막대에 닿지 않아도 x 위치 기준 말풍선
+        hoverdistance: -1, spikedistance: -1,
+
+        xaxis: {
+          type: 'date',
+          range: [new Date(xMinMs), new Date(xMaxMs)], // 좌/우: 데이터 범위로만
+          tickmode: 'array', tickvals, ticktext,
+          zeroline: false,
+          showspikes: true, spikemode: 'toaxis+across', spikesnap: 'cursor',
+          spikecolor: '#999', spikethickness: 1,
+          hoverformat: ' - %H:%M:%S - ' // 말풍선 헤더: 시간만
+        },
+        yaxis: {
+          rangemode: 'tozero',
+          fixedrange: true,   // 세로 확대/축소 금지(조종 기능 유지: 가로만)
+          tickmode: 'auto',
+          nticks: 8,
+          tickformat: ',d',
+          zeroline: false
+        },
+        dragmode: 'pan'
+      };
+
+      const config = { responsive:true, scrollZoom:true, displaylogo:false, modeBarButtonsToRemove:['select2d','lasso2d'] };
+
+      Plotly.newPlot(chartEl, traces, layout, config).then(gd => {
+        // x축 눈금 갱신(디바운스 + 가드)
+        gd.on('plotly_relayout', (ev) => {
+          if (isTickUpdating) return;
+          const s = ev['xaxis.range[0]'] ?? gd.layout.xaxis.range[0];
+          const e = ev['xaxis.range[1]'] ?? gd.layout.xaxis.range[1];
+          const x0 = new Date(s).getTime();
+          const x1 = new Date(e).getTime();
+          clearTimeout(relayoutTimer);
+          relayoutTimer = setTimeout(() => {
+            const { tickvals, ticktext } = computeDateTicks(x0, x1);
+            isTickUpdating = true;
+            Plotly.relayout(gd, {
+              'xaxis.tickmode': 'array',
+              'xaxis.tickvals': tickvals,
+              'xaxis.ticktext': ticktext
+            }).then(()=>{ isTickUpdating=false; }).catch(()=>{ isTickUpdating=false; });
+          }, 100);
+        });
+
+        // ========== 커서 추적 말풍선(항상 마우스 x 위치 기준 시간만 표시) ==========
+        // 포커스가 차트 위에 있을 때만 표시, 데이터 바깥이면 숨김
+        function onMouseMove(ev) {
+          const rect = gd.getBoundingClientRect();
+          const xaxis = gd.layout.xaxis; // 현재 layout의 표시 범위(date 객체)
+          if (!xaxis || !xaxis.range) return;
+
+          const rangeStartMs = new Date(xaxis.range[0]).getTime();
+          const rangeEndMs   = new Date(xaxis.range[1]).getTime();
+
+          // 플롯 영역 계산(왼쪽 오프셋/너비)
+          const full = gd._fullLayout;
+          const xax  = full.xaxis, yax = full.yaxis;
+          if (!xax || !yax) return;
+
+          const plotLeft = rect.left + xax._offset;
+          const plotTop  = rect.top  + yax._offset;
+          const plotW    = xax._length;
+          const plotH    = yax._length;
+
+          // 마우스가 플롯 영역 안에 있는지
+          if (ev.clientX < plotLeft || ev.clientX > plotLeft + plotW ||
+              ev.clientY < plotTop  || ev.clientY > plotTop  + plotH) {
+            cursorBox.style.display = 'none';
+            return;
+          }
+
+          // 플롯 내부 x픽셀 → 현재 x범위(ms)로 선형 매핑
+          const relX = ev.clientX - plotLeft;                  // [0, plotW]
+          const posMs = rangeStartMs + (rangeEndMs - rangeStartMs) * (relX / plotW);
+
+          // 상대 초(첫 시각을 0으로 본다)
+          const relSec = Math.round((posMs - xMinMs) / 1000);
+          // 데이터 범위(0 ~ (xMaxMs-xMinMs)/1000) 안일 때만 표시
+          const maxRelSec = Math.round((xMaxMs - xMinMs) / 1000);
+          if (relSec < 0 || relSec > maxRelSec) {
+            cursorBox.style.display = 'none';
+            return;
+          }
+
+          // 말풍선 내용 및 위치
+          cursorBox.textContent = `- ${secToHMS(relSec)} -`;
+          cursorBox.style.left = `${ev.clientX}px`;
+          cursorBox.style.top  = `${ev.clientY}px`;
+          cursorBox.style.display = 'block';
+        }
+        function onMouseLeave() {
+          cursorBox.style.display = 'none';
+        }
+
+        // 이벤트 바인딩(중복 방지 위해 먼저 제거 후 추가)
+        gd.removeEventListener('mousemove', onMouseMove);
+        gd.removeEventListener('mouseleave', onMouseLeave);
+        gd.addEventListener('mousemove', onMouseMove);
+        gd.addEventListener('mouseleave', onMouseLeave);
+      });
+    }
+
+    function updateSummary(rows, ttSec, line) {
+      const total = rows.length;
+      const durSec = Math.max(0, line.endSec - line.startSec);
+      summaryEl.innerHTML = `총 메시지: <b>${total.toLocaleString()}</b>건 · 표시 범위: <b>00:00:00</b> ~ <b>${secToHMS(durSec)}</b> · tt: <b>${ttSec}</b>초`;
+    }
+
+    // CSV → 집계 → 그리기
+    function handleParsedRows(rows) {
+      rawRows = rows;
+      infoEl.textContent = `불러온 행: ${rawRows.length.toLocaleString()}건`;
+      infoEl.style.color = '#666';
+
+      const ttSec = Math.max(1, (ttEl.value|0));
+      const lineB = bucketize(rawRows, ttSec);
+      const barB  = bucketize(rawRows, barBinSec);
+
+      // 상대축 계산용 보조 필드
+      lineB.startSec = lineB.startSec ?? (lineB.xsSec.length ? lineB.xsSec[0] : 0);
+      lineB.endSec   = lineB.endSec   ?? (lineB.xsSec.length ? lineB.xsSec[lineB.xsSec.length-1] : 0);
+
+      draw(lineB, barB);
+      updateSummary(rawRows, ttSec, lineB);
+      plotInited = true;
+    }
+
+    // 드롭/클릭 업로드
+    ['dragenter','dragover'].forEach(evt => dropzone.addEventListener(evt, e => { e.preventDefault(); dropzone.classList.add('hover'); }));
+    ['dragleave','dragend'].forEach(evt => dropzone.addEventListener(evt, () => dropzone.classList.remove('hover')));
+    dropzone.addEventListener('drop', e => {
+      e.preventDefault(); dropzone.classList.remove('hover');
+      const f = e.dataTransfer?.files?.[0]; if (!f) return;
+      Papa.parse(f, {
+        header:true, skipEmptyLines:true, encoding:'utf-8',
+        complete:(res)=>handleParsedRows(res.data.map(r=>({ time:r['재생시간']??r['time']??'', nick:r['닉네임']??r['nickname']??'', msg:r['메시지']??r['message']??'' })).filter(r=>r.time)),
+        error:(err)=>{ console.error(err); infoEl.textContent='CSV 파싱 오류가 발생했습니다.'; infoEl.style.color='#c0392b'; }
+      });
+    });
+    fileEl.addEventListener('change', e => {
+      const f = e.target.files?.[0]; if (!f) return;
+      Papa.parse(f, {
+        header:true, skipEmptyLines:true, encoding:'utf-8',
+        complete:(res)=>handleParsedRows(res.data.map(r=>({ time:r['재생시간']??r['time']??'', nick:r['닉네임']??r['nickname']??'', msg:r['메시지']??r['message']??'' })).filter(r=>r.time)),
+        error:(err)=>{ console.error(err); infoEl.textContent='CSV 파싱 오류가 발생했습니다.'; infoEl.style.color='#c0392b'; }
+      });
+    });
+
+    // tt 변경
+    ttEl.addEventListener('input', () => {
+      const v = ttEl.value|0;
+      ttLabel.textContent = `tt = ${v}초${v===0?' (계산은 1초로 처리)':''}`;
+    });
+    ttEl.addEventListener('change', () => {
+      if (!plotInited || !rawRows.length) return;
+      const ttSec = Math.max(1, (ttEl.value|0));
+      const lineB = bucketize(rawRows, ttSec);
+      const barB  = bucketize(rawRows, barBinSec);
+      lineB.startSec = lineB.startSec ?? (lineB.xsSec.length ? lineB.xsSec[0] : 0);
+      lineB.endSec   = lineB.endSec   ?? (lineB.xsSec.length ? lineB.xsSec[lineB.xsSec.length-1] : 0);
+      draw(lineB, barB);
+      updateSummary(rawRows, ttSec, lineB);
+    });
+
+    // 다시 그리기
+    redrawBtn.addEventListener('click', () => {
+      if (!plotInited || !rawRows.length) { infoEl.textContent='먼저 CSV를 불러오세요.'; infoEl.style.color='#c0392b'; return; }
+      const ttSec = Math.max(1, (ttEl.value|0));
+      const lineB = bucketize(rawRows, ttSec);
+      const barB  = bucketize(rawRows, barBinSec);
+      lineB.startSec = lineB.startSec ?? (lineB.xsSec.length ? lineB.xsSec[0] : 0);
+      lineB.endSec   = lineB.endSec   ?? (lineB.xsSec.length ? lineB.xsSec[lineB.xsSec.length-1] : 0);
+      draw(lineB, barB);
+      updateSummary(rawRows, ttSec, lineB);
+      infoEl.textContent = '갱신 완료'; infoEl.style.color = '#666';
+    });
+
+    // 데이터 범위로(좌/우 빈 구간 라벨 제거 유지)
+    fitBtn.addEventListener('click', () => {
+      if (!chartEl.layout) return;
+      const x0 = chartEl.data?.[0]?.x?.[0] || chartEl.data?.[1]?.x?.[0] || new Date(localMidnightBaseMs);
+      const x1 = chartEl.data?.[0]?.x?.slice(-1)[0] || chartEl.data?.[1]?.x?.slice(-1)[0] || new Date(localMidnightBaseMs);
+      const { tickvals, ticktext } = computeDateTicks(new Date(x0).getTime(), new Date(x1).getTime());
+      isTickUpdating = true;
+      Plotly.relayout(chartEl, {
+        'xaxis.range': [x0, x1],
+        'xaxis.tickmode': 'array',
+        'xaxis.tickvals': tickvals,
+        'xaxis.ticktext': ticktext,
+        'yaxis.autorange': true
+      }).then(()=>{ isTickUpdating=false; }).catch(()=>{ isTickUpdating=false; });
+    });
+  </script>
+</body>
+</html>
