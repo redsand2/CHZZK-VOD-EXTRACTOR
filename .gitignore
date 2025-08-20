@@ -4,3 +4,4 @@
 *.json
 *.txt
 !/manifest.json
+*.sh
