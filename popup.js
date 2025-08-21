@@ -79,6 +79,8 @@ function wirePrefAutosave() {
 
 // ===== 메인 흐름(버튼) =====
 async function startTask(mode) {
+  setIndeterminate(false);
+  setProgress(0);
   const input = document.getElementById('userInput');
   const resultDiv = document.getElementById('result');
   const elapsedTextEl = document.getElementById('elapsedTime');

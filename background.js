@@ -13,7 +13,8 @@ let task = {
   startedAt: 0,
   fileInfo: null,       // {channelName, openDate}
   aborter: null,
-  rawChats: []          // JSON 모드용
+  rawChats: [],          // JSON 모드용
+  duration : null
 };
 
 const sleep = (ms) => new Promise(res => setTimeout(res, ms));
@@ -87,6 +88,7 @@ async function fetchVideoMeta(videoId, signal) {
   const candidates = [content?.openDate, content?.publishDate, content?.publishedAt, content?.createdAt, content?.createdDate, content?.openAt];
   const rawDate = candidates.find(v => typeof v === 'string' && v.length > 0) ?? null;
   const openDate = toYMD(rawDate) ?? '날짜미상';
+  task.durationMs = content?.duration * 1000 ?? null;
   return { channelName, openDate };
 }
 
@@ -106,7 +108,7 @@ async function saveCSV_dataURLSmart(rows, fileInfo) {
   for (const r of rows) whole += [esc(r.time), esc(r.nickname), esc(r.message)].join(',') + '\n';
   if (utf8Size(whole) <= MAX_DATAURL_BYTES) {
     const dataUrl = 'data:text/csv;charset=utf-8,' + encodeURIComponent(whole);
-    const filename = `[${fileInfo.openDate}]_${fileInfo.channelName}.csv`;
+    const filename = `[${fileInfo.openDate}]_${fileInfo.channelName}_${task.videoId}.csv`;
     await chrome.downloads.download({ url: dataUrl, filename, saveAs: false });
     return;
   }
@@ -147,7 +149,7 @@ async function saveJSON_dataURLSmart(rawChats, fileInfo, rawTemplate) {
   let jsonStr = buildJsonPayloadString(rawTemplate, rawChats);
   if (utf8Size(jsonStr) <= MAX_DATAURL_BYTES) {
     const dataUrl = 'data:application/json;charset=utf-8,' + encodeURIComponent(jsonStr);
-    const filename = `raw_${fileInfo.openDate}_${fileInfo.channelName}.json`;
+    const filename = `raw_${fileInfo.openDate}_${fileInfo.channelName}_${task.videoId}.json`;
     await chrome.downloads.download({ url: dataUrl, filename, saveAs: false });
     return;
   }
@@ -250,11 +252,15 @@ async function runTask({ mode, videoId, startMs, endMs }) {
   task.startedAt = Date.now();
   task.aborter = new AbortController();
   task.rawChats = [];
+  task.durationMs = 0;
 
-  // 파일명용 메타
-  try { task.fileInfo = await fetchVideoMeta(videoId, task.aborter.signal); }
+  // VOD 메타데이터
+  try { 
+    task.fileInfo = await fetchVideoMeta(videoId, task.aborter.signal); 
+  }
   catch {
-    const d = new Date(); const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
+    const d = new Date();
+    const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
     task.fileInfo = { channelName: '채널미상', openDate: `${y}-${m}-${day}` };
   }
 
@@ -356,13 +362,10 @@ async function runTask({ mode, videoId, startMs, endMs }) {
       }
 
       // 진행률
-      if (hasEnd) {
-        const progressedMs = Math.max(0, Math.min(pageMaxTime, task.endMs) - task.startMs);
-        const totalMs = task.endMs - task.startMs;
-        task.percent = Math.max(0, Math.min(100, Math.floor((progressedMs / totalMs) * 100)));
-      } else {
-        task.percent = task.percent ?? null;
-      }
+      const progressedMs = Math.max(0, Math.min(task.durationMs, task.endMs) - task.startMs);
+      const totalMs = task.endMs - task.startMs;
+      task.percent = Math.max(0, Math.min(100, Math.floor((ti / progressedMs) * 100)));
+
       task.got = chats.length;
       task.count = (mode === 'csv' ? csvRows.length : task.rawChats.length);
       sendProgress();
