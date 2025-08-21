@@ -168,16 +168,111 @@ document.getElementById('generateBtn')?.addEventListener('click', () => startTas
 document.getElementById('generateJsonBtn')?.addEventListener('click', () => startTask('json'));
 document.getElementById('userInput')?.addEventListener('keypress', (e) => { if (e.key === 'Enter') startTask('csv'); });
 
-// 팝업 재오픈 시 진행 중이면 상태 복구
-(async () => {
-  try {
-    const res = await chrome.runtime.sendMessage({ type: 'GET_STATUS' });
-    const snap = res?.snapshot;
-    if (snap?.running || res?.running) {
-      setProgress(snap?.percent ?? null);
-      const resultDiv = document.getElementById('result');
-      resultDiv.textContent = '백그라운드에서 작업 진행 중...';
-      resultDiv.style.color = '#333';
+// 팝업 열릴 때 1) 상태 복구 + 2) 실시간 수신 + 3) 놓친 틱 복구 + 4) 폴백 폴링
+(() => {
+  'use strict';
+
+  const resultDiv = document.getElementById('result');
+
+  // 상태 문구 표시(존재할 때만)
+  function setStatus(text, color = '#333') {
+    if (!resultDiv) return;
+    resultDiv.textContent = String(text ?? '');
+    resultDiv.style.color = color;
+  }
+
+  // 초기 복구: GET_STATUS로 현재 진행률/러닝 여부 복원
+  async function hydrateOnce() {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: 'GET_STATUS' });
+      const snap = res?.snapshot;
+      const running = !!(snap?.running || res?.running);
+      if (running) {
+        const p = Number(snap?.percent ?? res?.percent);
+        setProgress(Number.isFinite(p) ? p : NaN);
+        setStatus('백그라운드에서 작업 진행 중...');
+      } else {
+        // 필요 시 초기 상태 지정
+        setIndeterminate(false);
+        setStatus('대기 중', '#666');
+      }
+    } catch {
+      // 무음 처리
     }
-  } catch {}
+  }
+
+  // 2) 실시간 수신: PROGRESS/DONE/ERROR를 계속 반영
+  function onBgMessage(msg) {
+    if (!msg || !msg.type) return;
+
+    if (msg.type === 'PROGRESS') {
+      const p = Number(msg.payload?.percent ?? msg.percent);
+      setProgress(Number.isFinite(p) ? p : NaN);
+      setStatus('백그라운드에서 작업 진행 중...');
+      return;
+    }
+
+    if (msg.type === 'DONE') {
+      setProgress(100);
+      setStatus(`완료: ${msg.filename || ''}`);
+      stopPoll();
+      return;
+    }
+
+    if (msg.type === 'ERROR') {
+      setIndeterminate(false);
+      setStatus(`오류: ${msg.message || ''}`, '#c00');
+      stopPoll();
+      return;
+    }
+  }
+
+  // 놓친 틱 복구: 배경에서 스냅샷(taskSnapshot) 갱신되면 따라가기
+  function onSessionChanged(changes, area) {
+    if (area !== 'session') return;
+    const snap = changes.taskSnapshot?.newValue;
+    if (!snap) return;
+    const p = Number(snap.percent);
+    setProgress(Number.isFinite(p) ? p : NaN);
+    setStatus('백그라운드에서 작업 진행 중...');
+  }
+
+  // 폴백 폴링: 메시지 채널이 순간 끊겨도 1초마다 복구
+  let pollTimer = null;
+  function startPoll(intervalMs = 1000) {
+    if (pollTimer) return;
+    pollTimer = setInterval(async () => {
+      try {
+        const res = await chrome.runtime.sendMessage({ type: 'GET_STATUS' });
+        const snap = res?.snapshot;
+        const running = !!(snap?.running || res?.running);
+        if (!running) return;
+        const p = Number(snap?.percent ?? res?.percent);
+        setProgress(Number.isFinite(p) ? p : NaN);
+        setStatus('백그라운드에서 작업 진행 중...');
+      } catch {
+        // 무음 처리
+      }
+    }, intervalMs);
+  }
+  function stopPoll() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  // 초기화
+  chrome.runtime.onMessage.addListener(onBgMessage);
+  chrome.storage?.session?.onChanged?.addListener?.(onSessionChanged);
+
+  hydrateOnce();
+  startPoll(1000);
+
+  // 팝업 종료 시 정리
+  window.addEventListener('unload', () => {
+    try { chrome.runtime.onMessage.removeListener(onBgMessage); } catch {}
+    try { chrome.storage?.session?.onChanged?.removeListener?.(onSessionChanged); } catch {}
+    stopPoll();
+  });
 })();
